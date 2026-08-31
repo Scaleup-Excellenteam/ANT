@@ -2,19 +2,31 @@
 
 Owned by Member 1 (Init/Offline Builder) per SPEC_MEMBER_1_INIT.md.
 Public API consumed by the Matching phase (Member 2) is re-exported here.
+See README.md for the full hand-off contract.
 """
 
-from .models import SentenceRef
-from .text_utils import normalize
-from .trie import Trie, TrieNode
-from .corpus_loader import iter_corpus_lines
-from .build_index import build_trie_from_zip
+from .corpus_index import (
+    CorpusIndex,
+    load_index,
+    load_or_build_index,
+    save_index,
+)
+from .models import RawLine, SentenceRecord
+from .text_utils import normalize, trigrams
+from .trigram_index import TrigramIndex
+from .vocabulary_trie import VocabularyTrie
+from .word_index import WordInvertedIndex
 
 __all__ = [
-    "SentenceRef",
+    "CorpusIndex",
+    "load_index",
+    "load_or_build_index",
+    "save_index",
+    "RawLine",
+    "SentenceRecord",
     "normalize",
-    "Trie",
-    "TrieNode",
-    "iter_corpus_lines",
-    "build_trie_from_zip",
+    "trigrams",
+    "TrigramIndex",
+    "VocabularyTrie",
+    "WordInvertedIndex",
 ]

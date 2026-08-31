@@ -2,7 +2,7 @@ import io
 import zipfile
 
 from init_offline.corpus_loader import iter_corpus_lines
-from init_offline.models import SentenceRef
+from init_offline.models import RawLine
 
 
 def make_zip_bytes(files):
@@ -26,9 +26,9 @@ def test_reads_lines_with_zero_based_offsets(tmp_path):
     refs = list(iter_corpus_lines(zip_path))
 
     assert refs == [
-        SentenceRef("first line", "file.txt", 0),
-        SentenceRef("second line", "file.txt", 1),
-        SentenceRef("third line", "file.txt", 2),
+        RawLine("first line", "file.txt", 0),
+        RawLine("second line", "file.txt", 1),
+        RawLine("third line", "file.txt", 2),
     ]
 
 
