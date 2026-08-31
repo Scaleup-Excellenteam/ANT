@@ -16,7 +16,10 @@ Pipeline:
 
 from typing import List, Optional
 
-from init_offline import CorpusIndex, load_or_build_index, normalize
+try:
+    from ..init_offline import CorpusIndex, load_or_build_index, normalize
+except ImportError:
+    from init_offline import CorpusIndex, load_or_build_index, normalize
 
 from .candidates import generate_candidates
 from .models import AutoCompleteData

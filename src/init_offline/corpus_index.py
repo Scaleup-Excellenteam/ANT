@@ -23,6 +23,10 @@ DEFAULT_CACHE_PATH = os.path.join(_REPO_ROOT, "corpus_index.pickle")
 # correctness guarantee does not hold (see trigram_index.py module docstring) -- callers must
 # use the short-query fallback documented in README.md instead of relying on
 # `trigram_candidates` alone.
+_BUNDLED_ARCHIVE_PATH = os.path.join(_REPO_ROOT, 'resources', 'Archive.zip')
+if os.path.exists(_BUNDLED_ARCHIVE_PATH):
+    DEFAULT_ARCHIVE_PATH = _BUNDLED_ARCHIVE_PATH
+
 SHORT_QUERY_MAX_LENGTH = 5
 
 

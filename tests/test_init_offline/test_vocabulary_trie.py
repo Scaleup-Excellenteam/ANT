@@ -1,3 +1,5 @@
+import pickle
+
 from init_offline.vocabulary_trie import VocabularyTrie
 
 
@@ -50,6 +52,16 @@ def test_words_containing_substring_finds_mid_word_matches():
     trie = build_trie(["asymmetric", "symmetry", "unrelated"])
     matches = trie.words_containing_substring("symmetric")
     assert matches == ["asymmetric"]
+
+
+def test_pickle_roundtrip_handles_words_deeper_than_recursion_limit():
+    long_word = 'x' * 2000
+    trie = build_trie([long_word, 'python'])
+
+    loaded = pickle.loads(pickle.dumps(trie))
+
+    assert loaded.contains(long_word)
+    assert loaded.contains('python')
 
 
 def test_words_containing_substring_empty_string_returns_all():

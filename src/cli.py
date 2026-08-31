@@ -10,7 +10,10 @@ serving logic.
 
 from typing import Callable, List, Sequence, Tuple
 
-from .auto_complete_data import AutoCompleteData
+try:
+    from .auto_complete_data import AutoCompleteData
+except ImportError:
+    from auto_complete_data import AutoCompleteData
 
 WELCOME_MSG = "The system is ready. Enter your text:"
 GET_INPUT = "Enter more text (# to restart, ~ to quit):"

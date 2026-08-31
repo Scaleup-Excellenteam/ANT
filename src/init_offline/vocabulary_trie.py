@@ -102,3 +102,14 @@ class VocabularyTrie:
 
     def __len__(self) -> int:
         return len(self._words)
+
+    def __getstate__(self):
+        # Serializing the nested nodes can exceed pickle's recursion limit for
+        # unusually long corpus tokens. The word set is compact and is enough
+        # to reconstruct the trie when loading the cache.
+        return {'words': self._words}
+
+    def __setstate__(self, state) -> None:
+        self.root = _TrieNode()
+        self._words = set()
+        self.build(state['words'])

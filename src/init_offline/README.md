@@ -10,7 +10,7 @@ corpus, and structurally unable to find matches that fall entirely inside a word
 ```python
 from init_offline import CorpusIndex, load_or_build_index, normalize
 
-index = load_or_build_index()          # builds from ../../Archive.zip, or loads the pickle cache
+index = load_or_build_index()          # builds from ../../resources/Archive.zip, or loads the cache
 query = normalize(user_typed_text)     # Member 2 MUST use this exact function
 ```
 
