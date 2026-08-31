@@ -95,6 +95,27 @@ common case. This is a real, expected characteristic of this design, not a bug �
 itself stays cheap either way since it's a direct scan of a short query against a short
 candidate sentence.
 
+## Memory optimization: postings stored as `array.array`, not `set`/`list`
+
+The first working version of this design stored word/trigram postings as `set[int]` (needed
+during accumulation for O(1) dedup as sentences stream in) and left them as sets in the
+finished index too. Measured on the real corpus, that cost ~5.6GB peak RSS — too high.
+
+The fix: a `set` is only needed *while building*. Once the corpus is fully processed, every
+posting list is fixed and only ever iterated/unioned, never probed element-by-element — so
+both `word_index.py` and `trigram_index.py` now finalize each bucket as a sorted
+`array.array('L', ...)` (raw packed 4-byte integers, no per-element Python object, no hash
+table) instead of a `set`. This is a straight memory win with no correctness change:
+- `WordInvertedIndex.candidates()` still returns `List[int]` — unchanged contract.
+- `TrigramIndex.candidates_for_trigram()` / `candidates_for_text()` still return `Set[int]` —
+  unchanged contract. Conversion happens at these API boundaries; internal storage is an
+  implementation detail Member 2 never has to know about.
+- Query-time union code barely changed: `set.update()` accepts an `array.array` directly, so
+  `result.update(self._postings.get(trigram, ()))` works exactly like it did with sets.
+
+See the commit introducing this change for the measured before/after build time, peak memory,
+and pickle size.
+
 ## Persistence
 
 ```python
