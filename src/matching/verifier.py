@@ -7,12 +7,12 @@ or becomes one after exactly one substitution/insertion/deletion applied to the 
 PROJECT_SPEC.md section 5.3's matching definition). More than one edit anywhere -> no match.
 
 Deliberately NOT a general edit-distance matrix over the whole sentence: since only 0 or 1
-edit is ever allowed, each edit type has a dedicated O(len(sentence) * len(query)) scan using
-a linear two-pointer check per candidate window, which is both simpler to verify by hand and
-cheaper than an O(len(sentence) * len(query)) DP table would be per candidate pair anyway (no
-matrix allocation, early-exit on a second mismatch). This function is only ever called against
-the (small) set of candidate sentences Member 1's index already narrowed down to -- never
-against the full corpus -- so this cost is paid per-candidate, not per-corpus-line.
+edit is ever allowed, a single fused scan finds all three edit types together (see
+`_scan_single_edit_windows`), which is both simpler to verify by hand and cheaper than an
+O(len(sentence) * len(query)) DP table would be per candidate pair anyway (no matrix
+allocation). This function is only ever called against the (small) set of candidate sentences
+Member 1's index already narrowed down to -- never against the full corpus -- so this cost is
+paid per-candidate, not per-corpus-line.
 
 A query can match at the start, middle, or end of a sentence, and entirely inside a word --
 this module places no restriction on where the matched window falls.
@@ -40,150 +40,60 @@ def verify_match(query: str, sentence: str) -> Optional[MatchResult]:
     if query in sentence:
         return MatchResult(edit_type="exact", edit_position=None, matching_characters=len(query))
 
-    candidates: List[MatchResult] = []
-    candidates.extend(_find_substitutions(query, sentence))
-    candidates.extend(_find_deletions(query, sentence))
-    candidates.extend(_find_insertions(query, sentence))
-
+    candidates = _scan_single_edit_windows(query, sentence)
     if not candidates:
         return None
     return max(candidates, key=score_match)
 
 
-def _find_substitutions(query: str, sentence: str) -> List[MatchResult]:
-    """Windows of `sentence` the same length as `query` that differ in exactly one
-    character position.
+def _scan_single_edit_windows(query: str, sentence: str) -> List[MatchResult]:
+    """One fused pass over every candidate start position in `sentence`, checking
+    substitution, deletion, and insertion together instead of with three separate scans.
+
+    The key idea: at a given start position, all three edit types begin the same way --
+    walk forward while `query` and `sentence` agree. Call the point where they first
+    disagree `front`. From there the three edit types are just three different guesses
+    about WHERE the "extra" character is:
+      - substitution: the very next characters differ, but the rest lines up if you
+        replace that one character.
+      - deletion: `query` has an extra character right there that `sentence` doesn't --
+        skip it in `query` and the rest lines up.
+      - insertion: `sentence` has an extra character right there that `query` doesn't --
+        skip it in `sentence` and the rest lines up.
+    Since `front` doesn't depend on which of these three we're checking, it's found ONCE
+    per start position (not three times), and "the rest lines up" is then checked with a
+    single whole-chunk string comparison (fast, implemented in C) instead of continuing to
+    compare one character at a time in Python.
+
+    Because `verify_match` already ruled out any exact match anywhere in `sentence` before
+    calling this, `front` can never reach the full length of `query` while a complete
+    query-length window is available -- if it did, that window would BE an exact match,
+    which we already know doesn't exist. That invariant is what keeps the slice bounds
+    below safe without extra special-casing.
     """
     results: List[MatchResult] = []
     qlen = len(query)
     slen = len(sentence)
-    if qlen == 0 or slen < qlen:
-        return results
 
-    for start in range(slen - qlen + 1):
-        diff_index = None
-        diff_count = 0
-        for i in range(qlen):
-            if query[i] != sentence[start + i]:
-                diff_count += 1
-                if diff_count > 1:
-                    break
-                diff_index = i
-        if diff_count == 1:
-            results.append(
-                MatchResult(
-                    edit_type="substitution",
-                    edit_position=diff_index + 1,
-                    matching_characters=qlen - 1,
-                )
-            )
+    # Deletion's window (qlen - 1) is the shortest, so it accepts the widest range of start
+    # positions -- use that as the outer bound; the substitution/insertion checks below
+    # each additionally guard for their own (stricter) window actually fitting.
+    for start in range(slen - qlen + 2):
+        limit = min(qlen, slen - start)
+        front = 0
+        while front < limit and query[front] == sentence[start + front]:
+            front += 1
+
+        if start + qlen <= slen:  # substitution's full-length window fits
+            if query[front + 1 :] == sentence[start + front + 1 : start + qlen]:
+                results.append(MatchResult("substitution", front + 1, qlen - 1))
+
+        if start + qlen - 1 <= slen:  # deletion's (qlen - 1)-length window fits
+            if query[front + 1 :] == sentence[start + front : start + qlen - 1]:
+                results.append(MatchResult("deletion", front + 1, qlen - 1))
+
+        if start + qlen + 1 <= slen:  # insertion's (qlen + 1)-length window fits
+            if query[front:] == sentence[start + front + 1 : start + qlen + 1]:
+                results.append(MatchResult("insertion", front + 1, qlen))
+
     return results
-
-
-def _find_deletions(query: str, sentence: str) -> List[MatchResult]:
-    """Windows of `sentence` one shorter than `query` that equal `query` with exactly one
-    character removed (the query has one extra character not present in the sentence).
-    """
-    results: List[MatchResult] = []
-    qlen = len(query)
-    window_len = qlen - 1
-    if window_len < 0:
-        return results
-    slen = len(sentence)
-    if slen < window_len:
-        return results
-
-    for start in range(slen - window_len + 1):
-        window = sentence[start : start + window_len]
-        position = _one_deletion_position(query, window)
-        if position is not None:
-            results.append(
-                MatchResult(
-                    edit_type="deletion", edit_position=position + 1, matching_characters=qlen - 1
-                )
-            )
-    return results
-
-
-def _find_insertions(query: str, sentence: str) -> List[MatchResult]:
-    """Windows of `sentence` one longer than `query` that equal `query` with exactly one
-    character inserted (the sentence has one extra character not present in the query).
-    """
-    results: List[MatchResult] = []
-    qlen = len(query)
-    window_len = qlen + 1
-    slen = len(sentence)
-    if slen < window_len:
-        return results
-
-    for start in range(slen - window_len + 1):
-        window = sentence[start : start + window_len]
-        position = _one_insertion_position(query, window)
-        if position is not None:
-            results.append(
-                MatchResult(
-                    edit_type="insertion", edit_position=position + 1, matching_characters=qlen
-                )
-            )
-    return results
-
-
-def _one_deletion_position(query: str, window: str) -> Optional[int]:
-    """If `window` (len(query) - 1 chars) equals `query` with exactly one character
-    removed, return the 0-based index of the removed character in `query`; else `None`.
-
-    Standard two-pointer "one edit distance" check, specialized to the deletion case.
-    """
-    qi = wi = 0
-    qlen, wlen = len(query), len(window)
-    skip_index = None
-
-    while qi < qlen and wi < wlen:
-        if query[qi] == window[wi]:
-            qi += 1
-            wi += 1
-        else:
-            if skip_index is not None:
-                return None
-            skip_index = qi
-            qi += 1
-
-    if skip_index is None and qi == qlen - 1 and wi == wlen:
-        # Only the last character of `query` is left over -- deleting it completes the match.
-        skip_index = qi
-        qi += 1
-
-    if skip_index is not None and qi == qlen and wi == wlen:
-        return skip_index
-    return None
-
-
-def _one_insertion_position(query: str, window: str) -> Optional[int]:
-    """If `window` (len(query) + 1 chars) equals `query` with exactly one character
-    inserted, return the 0-based index in `query` where the insertion happened; else `None`.
-
-    Mirror of `_one_deletion_position` with the roles of query/window swapped (the extra
-    character lives in `window` instead of `query`).
-    """
-    qi = wi = 0
-    qlen, wlen = len(query), len(window)
-    insert_index = None
-
-    while qi < qlen and wi < wlen:
-        if query[qi] == window[wi]:
-            qi += 1
-            wi += 1
-        else:
-            if insert_index is not None:
-                return None
-            insert_index = qi
-            wi += 1
-
-    if insert_index is None and wi == wlen - 1 and qi == qlen:
-        # Only the last character of `window` is left over -- it's the inserted one.
-        insert_index = qi
-        wi += 1
-
-    if insert_index is not None and qi == qlen and wi == wlen:
-        return insert_index
-    return None
