@@ -51,8 +51,9 @@ def format_suggestions(results: Sequence[AutoCompleteData]) -> str:
 
     lines = [f"Here are {len(results)} suggestions:"]
     for rank, result in enumerate(results, start=1):
+        displayed_sentence = result.completed_sentence.lstrip()
         lines.append(
-            f"{rank}. {result.completed_sentence} "
+            f"{rank}. {displayed_sentence} "
             f"({result.source_text}:{result.offset}, score={result.score})"
         )
     return "\n".join(lines)

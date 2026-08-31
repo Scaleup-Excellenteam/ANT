@@ -101,3 +101,17 @@ def test_output_contains_all_required_fields():
     assert "python.txt" in output
     assert "42" in output
     assert "20" in output
+
+
+def test_output_removes_leading_whitespace_from_sentence():
+    result = AutoCompleteData(
+        completed_sentence="\t    Indented sentence.",
+        source_text="indented.txt",
+        offset=3,
+        score=12,
+    )
+
+    output = format_suggestions([result])
+
+    assert "1. Indented sentence." in output
+    assert "1. \t" not in output
