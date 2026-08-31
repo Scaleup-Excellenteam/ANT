@@ -1,4 +1,4 @@
-"""Temporary runnable entry point for Member 3 development.
+"""Runnable entry point for the integrated Parts A and B application.
 
 Run from the project root with:
     python -m src.main
@@ -8,15 +8,20 @@ query, then reuses it for subsequent queries.
 """
 
 try:
-    from .cli import run_cli
+    from .contextual import GeminiSuggestionClient
+    from .enhanced_cli import run_feature_cli
     from .matching import get_best_k_completions
 except ImportError:  # Also supports: python src/main.py
-    from cli import run_cli
+    from contextual import GeminiSuggestionClient
+    from enhanced_cli import run_feature_cli
     from matching import get_best_k_completions
 
 
 def main() -> None:
-    run_cli(get_best_k_completions)
+    run_feature_cli(
+        corpus_search=get_best_k_completions,
+        contextual_generator=GeminiSuggestionClient(),
+    )
 
 
 if __name__ == "__main__":

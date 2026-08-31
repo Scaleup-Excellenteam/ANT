@@ -3,9 +3,8 @@
 This module intentionally depends only on a search function with the contract:
     get_best_k_completions(prefix: str) -> List[AutoCompleteData]
 
-For now `main.py` injects a mock implementation. When Member 2 finishes, the
-same CLI can be connected to the real matching function without rewriting the
-serving logic.
+The Part B interface reuses these Part A formatting and query helpers from
+`enhanced_cli.py`, keeping the original corpus behavior independently testable.
 """
 
 from typing import Callable, List, Sequence, Tuple
