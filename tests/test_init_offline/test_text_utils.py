@@ -23,6 +23,24 @@ def test_equivalent_inputs_normalize_identically():
     assert len(normalized) == 1
 
 
+def test_removes_punctuation_without_inserting_a_space():
+    # Per the assignment's literal wording ("remove punctuation"), punctuation with no
+    # adjacent whitespace must be DELETED, not replaced by a separator -- "don't" is 4
+    # normalized characters ("dont"), not 5 ("don t"). Getting this backwards would silently
+    # add characters/positions that were never in the original text, corrupting every
+    # downstream position-based edit penalty calculation.
+    assert normalize("don't") == "dont"
+    assert normalize("well-known") == "wellknown"
+    assert normalize("e.g.") == "eg"
+
+
+def test_punctuation_with_existing_adjacent_space_still_collapses_correctly():
+    # Sanity check that the fix doesn't break the case that already worked before: when
+    # punctuation IS already adjacent to a real space, removal + whitespace-collapse still
+    # yields a single space, not zero spaces.
+    assert normalize("be, that") == "be that"
+
+
 def test_trigrams_basic():
     assert list(trigrams("to be")) == ["to ", "o b", " be"]
 
