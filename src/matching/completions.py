@@ -10,10 +10,10 @@ Pipeline:
         -> verify_match(normalized_query, ...)           [Member 2, verifier.py]
         -> score_match(...)                              [Member 2, scoring.py]
         -> AutoCompleteData(...)
-        -> sort by score desc, then completed_sentence alphabetically
-        -> top k
+        -> top-k selection by score desc, then completed_sentence alphabetically
 """
 
+import heapq
 from typing import List, Optional
 
 try:
@@ -64,20 +64,29 @@ def get_best_k_completions(
 
     candidate_ids = generate_candidates(index, normalized_query)
 
-    completions: List[AutoCompleteData] = []
-    for sentence_id in candidate_ids:
-        record = index.get_sentence(sentence_id)
-        match = verify_match(normalized_query, record.normalized_text)
-        if match is None:
-            continue
-        completions.append(
-            AutoCompleteData(
-                completed_sentence=record.original_text,
-                source_text=record.source_path,
-                offset=record.offset,
-                score=score_match(match),
-            )
-        )
+    def scored_matches():
+        """Yield (score, completed_sentence, source_text, offset) for every candidate that
+        verifies -- a plain tuple, not `AutoCompleteData`, since most candidates never make
+        the final top k and building the dataclass for each one would be wasted work.
+        """
+        for sentence_id in candidate_ids:
+            record = index.get_sentence(sentence_id)
+            match = verify_match(normalized_query, record.normalized_text)
+            if match is None:
+                continue
+            yield (score_match(match), record.original_text, record.source_path, record.offset)
 
-    completions.sort(key=lambda item: (-item.score, item.completed_sentence))
-    return completions[:k]
+    # heapq.nsmallest(k, iterable, key) is documented to be equivalent to
+    # sorted(iterable, key=key)[:k] -- identical ranking semantics to a full sort, but
+    # O(candidates * log k) instead of O(candidates * log candidates), and it never
+    # materializes more than k items at a time (the generator above is consumed lazily).
+    # Negating the score in the key makes "smallest key" mean "highest score first"; the
+    # completed_sentence stays ascending for the alphabetical tie-break.
+    top = heapq.nsmallest(k, scored_matches(), key=lambda item: (-item[0], item[1]))
+
+    return [
+        AutoCompleteData(
+            completed_sentence=sentence, source_text=source, offset=offset, score=score
+        )
+        for score, sentence, source, offset in top
+    ]
