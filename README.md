@@ -49,6 +49,28 @@ Set `AUTOCOMPLETE_LOG_FILE` to override the log path. Log files rotate at 5 MB,
 with three backups (`app.log.1` through `app.log.3`). Generated logs are ignored
 by Git. API keys, tokens, and environment-variable values are never logged.
 
+### Future satellite communication logging
+
+`src.communication_logging.SatelliteCommunicationLogger` is a transport-agnostic
+event helper for future server-to-satellite code. It uses the same centralized
+handler and named `satellite.*` loggers. It measures ACK latency and connection
+downtime with a monotonic clock and records retry, queue, delivery, bandwidth,
+and byte-count metadata. It does not implement networking, queues, or compression.
+
+```python
+from src.communication_logging import SatelliteCommunicationLogger
+
+communication_log = SatelliteCommunicationLogger()
+communication_log.message_sent(421, priority="high")
+communication_log.waiting_for_ack(421)
+# Future transport waits for its ACK here.
+communication_log.ack_received(421)
+```
+
+The helper intentionally accepts no message payload, API key, token, password,
+or other credential arguments. Future transport code should pass identifiers and
+metrics only.
+
 ## Team decisions currently used by this initial workspace
 
 - Empty input: print a message and do not search.
