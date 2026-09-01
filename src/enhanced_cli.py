@@ -31,11 +31,6 @@ class ContextualGenerator(Protocol):
         ...
 
 
-class ActivityRecorder(Protocol):
-    def record_query(self, query: str, mode: str, context: str) -> None:
-        ...
-
-
 @dataclass(frozen=True)
 class SessionState:
     mode: str = CORPUS_MODE
@@ -210,7 +205,6 @@ def run_feature_cli(
     corpus_search: CorpusSearch,
     contextual_generator: Optional[ContextualGenerator] = None,
     translation_service: Optional[TranslationService] = None,
-    activity_recorder: Optional[ActivityRecorder] = None,
 ) -> None:
     """Run the integrated Part A + Part B interactive experience."""
     state = SessionState()
@@ -233,15 +227,5 @@ def run_feature_cli(
         )
         state = interaction.state
         print(interaction.output)
-        stripped_input = additional_input.strip()
-        if (
-            activity_recorder is not None
-            and stripped_input
-            and not stripped_input.startswith("/")
-            and not additional_input.endswith("#")
-            and not interaction.should_exit
-            and state.query.strip()
-        ):
-            activity_recorder.record_query(state.query, state.mode, state.context)
         if interaction.should_exit:
             break
