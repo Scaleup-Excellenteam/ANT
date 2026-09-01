@@ -8,17 +8,25 @@ same CLI can be connected to the real matching function without rewriting the
 serving logic.
 """
 
-from typing import Callable, List, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 try:
     from .auto_complete_data import AutoCompleteData
+    from .translation import TranslationError, TranslationResult, TranslationService
 except ImportError:
     from auto_complete_data import AutoCompleteData
+    from translation import TranslationError, TranslationResult, TranslationService
 
 WELCOME_MSG = "The system is ready. Enter your text:"
 GET_INPUT = "Enter more text (# to restart, ~ to quit):"
 QUIT_MESSAGE = "~"
 RESTART_MESSAGE = "#"
+TRANSLATE_COMMAND = "/translate"
+ENGLISH_COMMAND = "/english"
+TRANSLATION_MODE_ENABLED = "Translation mode enabled. Target language: English."
+ENGLISH_MODE_ENABLED = "English mode enabled."
+TRANSLATION_UNAVAILABLE = "Translation mode is unavailable: no translation service configured."
+TRANSLATED_QUERY_PREFIX = "Translated English query:"
 NO_MATCHES = "No suggestions found."
 EMPTY_INPUT = "Please enter some text."
 BEST_MATCHES = 5
@@ -72,29 +80,83 @@ def process_input(
         (updated_query, text_to_print)
     """
 
+    updated_query, output, _ = process_input_with_mode(
+        current_query=current_query,
+        new_text=new_text,
+        search_function=search_function,
+        translation_service=None,
+        translation_mode=False,
+    )
+    return updated_query, output
+
+
+def process_input_with_mode(
+    current_query: str,
+    new_text: str,
+    search_function: SearchFunction,
+    translation_service: Optional[TranslationService] = None,
+    translation_mode: bool = False,
+) -> Tuple[str, str, bool]:
+    """Process one Enter press, including English/Translation mode commands."""
+
+    command = new_text.strip().lower()
+    if command == TRANSLATE_COMMAND:
+        return current_query, TRANSLATION_MODE_ENABLED, True
+    if command == ENGLISH_COMMAND:
+        return current_query, ENGLISH_MODE_ENABLED, False
+
     # '#' means the user finished the current sentence and wants a fresh query.
     if new_text.endswith(RESTART_MESSAGE):
-        return "", "Query reset. Start a new sentence."
+        return "", "Query reset. Start a new sentence.", translation_mode
 
     updated_query = current_query + new_text
 
     if not updated_query.strip():
-        return updated_query, EMPTY_INPUT
+        return updated_query, EMPTY_INPUT, translation_mode
+
+    if translation_mode:
+        if translation_service is None:
+            return updated_query, TRANSLATION_UNAVAILABLE, translation_mode
+        try:
+            translation = translation_service.translate_to_english(updated_query)
+        except TranslationError as exc:
+            return updated_query, f"Translation failed: {exc}", translation_mode
+        output = _format_translated_search(translation, search_function)
+        return updated_query, output, translation_mode
 
     results = search_function(updated_query)
     results = prepare_results(results)
-    return updated_query, format_suggestions(results)
+    return updated_query, format_suggestions(results), translation_mode
 
 
-def run_cli(search_function: SearchFunction) -> None:
+def _format_translated_search(
+    translation: TranslationResult, search_function: SearchFunction
+) -> str:
+    translated_query = translation.translated_text
+    results = search_function(translated_query)
+    results = prepare_results(results)
+    return "\n".join(
+        [
+            f"{TRANSLATED_QUERY_PREFIX} {translated_query}",
+            format_suggestions(results),
+        ]
+    )
+
+
+def run_cli(
+    search_function: SearchFunction,
+    translation_service: Optional[TranslationService] = None,
+) -> None:
     """Run the online/serving loop."""
 
     current_query = ""
+    translation_mode = False
     print(WELCOME_MSG)
 
     while True:
         try:
-            additional_input = input(f"{GET_INPUT} {current_query}")
+            mode_label = "Translation" if translation_mode else "English"
+            additional_input = input(f"[{mode_label}] {GET_INPUT} {current_query}")
         except (EOFError, KeyboardInterrupt):
             print("\nGoodbye.")
             break
@@ -103,9 +165,11 @@ def run_cli(search_function: SearchFunction) -> None:
             print("Goodbye.")
             break
 
-        current_query, output = process_input(
+        current_query, output, translation_mode = process_input_with_mode(
             current_query=current_query,
             new_text=additional_input,
             search_function=search_function,
+            translation_service=translation_service,
+            translation_mode=translation_mode,
         )
         print(output)
