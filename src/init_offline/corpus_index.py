@@ -3,6 +3,7 @@
 short-query fallback usage pattern (query lengths 1-5).
 """
 
+import logging
 import os
 import pickle
 import time
@@ -28,6 +29,7 @@ if os.path.exists(_BUNDLED_ARCHIVE_PATH):
     DEFAULT_ARCHIVE_PATH = _BUNDLED_ARCHIVE_PATH
 
 SHORT_QUERY_MAX_LENGTH = 5
+logger = logging.getLogger("index")
 
 
 class CorpusIndex:
@@ -41,6 +43,8 @@ class CorpusIndex:
 
     @classmethod
     def build_from_zip(cls, zip_path: str = DEFAULT_ARCHIVE_PATH) -> "CorpusIndex":
+        started = time.perf_counter()
+        logger.info("Index build started; archive=%s", zip_path)
         index = cls()
         for sentence_id, raw_line in enumerate(iter_corpus_lines(zip_path)):
             index.sentences.append(
@@ -55,6 +59,13 @@ class CorpusIndex:
         index.word_index.build(index.sentences)
         index.trigram_index.build(index.sentences)
         index.vocabulary.build(index.word_index.vocabulary())
+        logger.info(
+            "Index build completed in %.3fs; sentences=%d vocabulary=%d trigrams=%d",
+            time.perf_counter() - started,
+            len(index.sentences),
+            len(index.vocabulary),
+            len(index.trigram_index),
+        )
         return index
 
     # ---- public query API (Member 2 / Member 3 hand-off) -----------------------
@@ -109,13 +120,33 @@ class CorpusIndex:
 
 
 def save_index(index: CorpusIndex, cache_path: str = DEFAULT_CACHE_PATH) -> None:
-    with open(cache_path, "wb") as f:
-        pickle.dump(index, f, protocol=pickle.HIGHEST_PROTOCOL)
+    logger.info("Saving index cache: %s", cache_path)
+    try:
+        with open(cache_path, "wb") as f:
+            pickle.dump(index, f, protocol=pickle.HIGHEST_PROTOCOL)
+    except (OSError, pickle.PickleError):
+        logger.error("Failed to save index cache: %s", cache_path)
+        raise
+    logger.info("Index cache saved; bytes=%d", os.path.getsize(cache_path))
 
 
 def load_index(cache_path: str = DEFAULT_CACHE_PATH) -> CorpusIndex:
-    with open(cache_path, "rb") as f:
-        return pickle.load(f)
+    started = time.perf_counter()
+    logger.info("Loading index cache: %s", cache_path)
+    try:
+        with open(cache_path, "rb") as f:
+            index = pickle.load(f)
+    except (OSError, pickle.PickleError):
+        logger.error("Failed to load index cache: %s", cache_path)
+        raise
+    logger.info(
+        "Index cache loaded in %.3fs; sentences=%d vocabulary=%d trigrams=%d",
+        time.perf_counter() - started,
+        len(index.sentences),
+        len(index.vocabulary),
+        len(index.trigram_index),
+    )
+    return index
 
 
 def load_or_build_index(
@@ -123,7 +154,9 @@ def load_or_build_index(
 ) -> CorpusIndex:
     """Load the cached index if present, otherwise build it from the corpus and cache it."""
     if os.path.exists(cache_path):
+        logger.debug("Index cache found; loading instead of rebuilding")
         return load_index(cache_path)
+    logger.warning("Index cache not found; building from corpus")
     index = CorpusIndex.build_from_zip(zip_path)
     save_index(index, cache_path)
     return index

@@ -10,16 +10,20 @@ Edge-case decisions made here (per SPEC_MEMBER_1_INIT.md "Detailed Requirements"
       de-duplicated here -- each occurrence gets its own record with its own source/offset.
 """
 
+import logging
 import zipfile
 from typing import Iterator
 
 from .models import RawLine
+
+logger = logging.getLogger("corpus")
 
 
 def iter_corpus_lines(zip_path: str) -> Iterator[RawLine]:
     """Walk every .txt file in `zip_path` (at any folder depth) and yield one RawLine per
     non-empty line, in file order, with 0-based line offsets.
     """
+    logger.info("Opening corpus archive: %s", zip_path)
     with zipfile.ZipFile(zip_path) as archive:
         for info in archive.infolist():
             if info.is_dir():
@@ -31,6 +35,7 @@ def iter_corpus_lines(zip_path: str) -> Iterator[RawLine]:
             try:
                 text = raw_bytes.decode("utf-8")
             except UnicodeDecodeError:
+                logger.warning("UTF-8 decode failed; using latin-1 for %s", info.filename)
                 text = raw_bytes.decode("latin-1")
 
             for offset, line in enumerate(text.splitlines()):

@@ -7,6 +7,7 @@ The Part B interface reuses these Part A formatting and query helpers from
 `enhanced_cli.py`, keeping the original corpus behavior independently testable.
 """
 
+import logging
 from typing import Callable, List, Optional, Sequence, Tuple
 
 try:
@@ -31,6 +32,7 @@ EMPTY_INPUT = "Please enter some text."
 BEST_MATCHES = 5
 
 SearchFunction = Callable[[str], List[AutoCompleteData]]
+logger = logging.getLogger("cli")
 
 
 def prepare_results(results: Sequence[AutoCompleteData]) -> List[AutoCompleteData]:
@@ -106,11 +108,13 @@ def process_input_with_mode(
 
     # '#' means the user finished the current sentence and wants a fresh query.
     if new_text.endswith(RESTART_MESSAGE):
+        logger.info("Query reset requested")
         return "", "Query reset. Start a new sentence.", translation_mode
 
     updated_query = current_query + new_text
 
     if not updated_query.strip():
+        logger.debug("Empty query ignored")
         return updated_query, EMPTY_INPUT, translation_mode
 
     if translation_mode:
@@ -150,6 +154,7 @@ def run_cli(
 
     current_query = ""
     translation_mode = False
+    logger.info("CLI session started")
     print(WELCOME_MSG)
 
     while True:
@@ -157,10 +162,12 @@ def run_cli(
             mode_label = "Translation" if translation_mode else "English"
             additional_input = input(f"[{mode_label}] {GET_INPUT} {current_query}")
         except (EOFError, KeyboardInterrupt):
+            logger.info("CLI session ended by input interruption")
             print("\nGoodbye.")
             break
 
         if additional_input.endswith(QUIT_MESSAGE):
+            logger.info("CLI session ended by user")
             print("Goodbye.")
             break
 

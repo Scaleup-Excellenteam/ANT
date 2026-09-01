@@ -6,3 +6,5 @@ corpus_index.pickle
 .env.*
 !.env.example
 .runtime/
+logs/*.log
+logs/*.log.*

@@ -233,6 +233,43 @@ displays its latency in milliseconds. Relevance is evaluated with the same prefi
 at least two distinct contexts and by confirming that each result begins with the prefix
 and follows the selected context.
 
+## Logging
+
+Application logging is configured once at startup and written to `logs/app.log`.
+The default level is `INFO`; use `DEBUG` for candidate, verification, ranking,
+and timing details:
+
+```powershell
+$env:AUTOCOMPLETE_LOG_LEVEL = "DEBUG"
+python -m src.main
+```
+
+Set `AUTOCOMPLETE_LOG_FILE` to override the log path. Log files rotate at 5 MB,
+with three backups (`app.log.1` through `app.log.3`). Generated logs are ignored
+by Git. API keys, tokens, and environment-variable values are never logged.
+
+### Future satellite communication logging
+
+`src.communication_logging.SatelliteCommunicationLogger` is a transport-agnostic
+event helper for future server-to-satellite code. It uses the same centralized
+handler and named `satellite.*` loggers. It measures ACK latency and connection
+downtime with a monotonic clock and records retry, queue, delivery, bandwidth,
+and byte-count metadata. It does not implement networking, queues, or compression.
+
+```python
+from src.communication_logging import SatelliteCommunicationLogger
+
+communication_log = SatelliteCommunicationLogger()
+communication_log.message_sent(421, priority="high")
+communication_log.waiting_for_ack(421)
+# Future transport waits for its ACK here.
+communication_log.ack_received(421)
+```
+
+The helper intentionally accepts no message payload, API key, token, password,
+or other credential arguments. Future transport code should pass identifiers and
+metrics only.
+
 ## Limitations and tradeoffs
 
 - Gemini suggestions are generated content, not factual corpus matches.
