@@ -1,2 +1,4 @@
 pytest>=8.0
 python-Levenshtein>=0.25
+protobuf>=6.31.1,<7
+grpcio-tools>=1.80,<2

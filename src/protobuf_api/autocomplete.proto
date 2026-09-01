@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package autocomplete.v1;
+
+enum SearchMode {
+  SEARCH_MODE_UNSPECIFIED = 0;
+  SEARCH_MODE_CORPUS = 1;
+  SEARCH_MODE_AI = 2;
+}
+
+message SearchRequest {
+  string query = 1;
+  SearchMode mode = 2;
+  string context = 3;
+  // Zero means the server default; this project allows at most five.
+  uint32 max_results = 4;
+}
+
+message CorpusOrigin {
+  string source_text = 1;
+  uint64 offset = 2;
+  int32 score = 3;
+}
+
+message AiOrigin {
+  string model = 1;
+}
+
+message Suggestion {
+  string text = 1;
+
+  // Exactly one origin carries mode-specific metadata.
+  oneof origin {
+    CorpusOrigin corpus = 2;
+    AiOrigin ai = 3;
+  }
+}
+
+message SearchResponse {
+  // Echoing the request makes a decoded response self-contained.
+  SearchRequest request = 1;
+  repeated Suggestion suggestions = 2;
+  uint64 latency_ms = 3;
+  string error = 4;
+}
