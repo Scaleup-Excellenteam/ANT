@@ -109,3 +109,41 @@ def run_cli(search_function: SearchFunction) -> None:
             search_function=search_function,
         )
         print(output)
+
+
+def format_semantic_suggestions(results) -> str:
+    """Format semantic rank separately from the Part A edit score."""
+
+    if not results:
+        return NO_MATCHES
+    lines = [f"Here are {len(results)} semantic suggestions:"]
+    for rank, result in enumerate(results, start=1):
+        lines.append(
+            f"{rank}. {result.completed_sentence.lstrip()} "
+            f"({result.source_text}:{result.offset}, "
+            f"semantic_similarity={result.similarity:.4f})"
+        )
+    return "\n".join(lines)
+
+
+def run_semantic_cli(search_function) -> None:
+    """Run an explicit semantic-search mode; Part A behavior stays untouched."""
+
+    print("Semantic search mode (Gemini Embeddings). Enter ~ to quit.")
+    while True:
+        try:
+            query = input("Semantic query: ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nGoodbye.")
+            break
+        if query.endswith(QUIT_MESSAGE):
+            print("Goodbye.")
+            break
+        if not query.strip():
+            print(EMPTY_INPUT)
+            continue
+        try:
+            print(format_semantic_suggestions(search_function(query)))
+        except Exception as exc:
+            print(f"Semantic search unavailable: {exc}")
+            print("The basic autocomplete mode is still available without --semantic.")

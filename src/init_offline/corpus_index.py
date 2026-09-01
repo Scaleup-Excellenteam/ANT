@@ -5,6 +5,7 @@ short-query fallback usage pattern (query lengths 1-5).
 
 import os
 import pickle
+import sys
 import time
 from typing import List
 
@@ -114,8 +115,26 @@ def save_index(index: CorpusIndex, cache_path: str = DEFAULT_CACHE_PATH) -> None
 
 
 def load_index(cache_path: str = DEFAULT_CACHE_PATH) -> CorpusIndex:
-    with open(cache_path, "rb") as f:
-        return pickle.load(f)
+    try:
+        with open(cache_path, "rb") as f:
+            return pickle.load(f)
+    except ModuleNotFoundError as exc:
+        # Older caches may have been created by `python src/main.py`, where this
+        # package is named `init_offline` instead of `src.init_offline`. Both are
+        # documented invocation styles, so alias the already-loaded modules and
+        # retry without forcing an expensive corpus rebuild.
+        if exc.name != "init_offline" or not __package__.startswith("src."):
+            raise
+        package = sys.modules[__package__]
+        sys.modules.setdefault("init_offline", package)
+        current_prefix = __package__ + "."
+        for module_name, module in list(sys.modules.items()):
+            if module_name.startswith(current_prefix):
+                legacy_name = "init_offline." + module_name[len(current_prefix) :]
+                sys.modules.setdefault(legacy_name, module)
+        sys.modules.setdefault("init_offline.corpus_index", sys.modules[__name__])
+        with open(cache_path, "rb") as f:
+            return pickle.load(f)
 
 
 def load_or_build_index(
