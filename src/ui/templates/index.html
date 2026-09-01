@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Google Auto-Complete</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="shell">
+    <header class="header">
+      <h1>Google Auto-Complete</h1>
+      <p>Smart corpus search with Gemini assistance</p>
+    </header>
+
+    <section class="search-panel" aria-label="Search controls">
+      <div class="mode-tabs" role="radiogroup" aria-label="Mode selector">
+        <button class="mode-tab active" type="button" data-mode="english" aria-pressed="true">
+          English Search
+        </button>
+        <button class="mode-tab" type="button" data-mode="gemini" aria-pressed="false">
+          Gemini
+        </button>
+      </div>
+
+      <form id="search-form" class="search-form">
+        <input id="query" name="query" type="search" autocomplete="off" placeholder="type your query..." aria-label="Search query">
+        <button id="search-button" type="submit">Search</button>
+      </form>
+
+      <label id="context-row" class="context-row hidden">
+        <span>Gemini context</span>
+        <input id="context" type="text" value="general, clear English" maxlength="500">
+      </label>
+
+      <div id="loading" class="loading hidden">Searching...</div>
+      <div id="status" class="status">Ready.</div>
+    </section>
+
+    <section class="results-section" aria-labelledby="results-title">
+      <h2 id="results-title">Results</h2>
+      <div id="results" class="results empty">No search yet.</div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
