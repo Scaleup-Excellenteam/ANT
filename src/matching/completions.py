@@ -15,13 +15,25 @@ Pipeline:
 
 import heapq
 import logging
+import os
+import pickle
 import time
 from typing import List, Optional
 
 try:
     from ..init_offline import CorpusIndex, load_or_build_index, normalize
+    from ..init_offline.snapshot_store import (
+        DEFAULT_SNAPSHOTS_DIR,
+        get_current_version,
+        load_snapshot,
+    )
 except ImportError:
     from init_offline import CorpusIndex, load_or_build_index, normalize
+    from init_offline.snapshot_store import (
+        DEFAULT_SNAPSHOTS_DIR,
+        get_current_version,
+        load_snapshot,
+    )
 
 from .candidates import generate_candidates
 from .models import AutoCompleteData
@@ -29,19 +41,138 @@ from .scoring import score_match
 from .verifier import verify_match
 
 DEFAULT_K = 5
+DEFAULT_RELOAD_CHECK_INTERVAL_SECONDS = 2.0
 logger = logging.getLogger("matching")
 
-# Lazy, process-wide singleton: the index is loaded/built once and reused across calls, per
+
+class HotReloadableIndex:
+    """ZDT (Zero DownTime): serves a `CorpusIndex` and keeps it live-updated.
+
+    Polls the `CURRENT` snapshot pointer written by `init_offline.snapshot_store` at most
+    once every `check_interval_seconds` -- not on every call -- so a hot process doing many
+    queries per second doesn't `stat()` the pointer file per query. Only when the pointer
+    names a version different from the one already loaded does it load that snapshot and
+    swap it in.
+
+    The swap itself is one attribute assignment (`self._index = new_index`). CPython
+    guarantees a single attribute assignment is atomic under the GIL, so any concurrent
+    caller of `.get()` observes either the previous, fully-built index or the new,
+    fully-built one -- never a half-loaded object -- and a query already in progress keeps
+    using whatever `CorpusIndex` object it already holds a local reference to, since that
+    reload never mutates the old object in place. No lock, restart, or dropped request is
+    needed for the swap itself. (A fully concurrent/multi-threaded deployment would still
+    want a lock around the *check-and-load* sequence in `_refresh_if_due` to avoid two
+    threads redundantly loading the same new snapshot at once -- harmless but wasteful; this
+    single-process CLI service never triggers that race.)
+
+    If `snapshots_dir` has no `CURRENT` pointer yet (no ZDT snapshot was ever published),
+    this transparently falls back to the pre-ZDT behavior -- `load_or_build_index()` against
+    the flat `corpus_index.pickle` cache -- so deployments that haven't adopted snapshot
+    publishing are unaffected.
+    """
+
+    def __init__(
+        self,
+        snapshots_dir: Optional[str] = None,
+        check_interval_seconds: Optional[float] = None,
+        legacy_zip_path: Optional[str] = None,
+        legacy_cache_path: Optional[str] = None,
+    ) -> None:
+        self._snapshots_dir = (
+            snapshots_dir
+            if snapshots_dir is not None
+            else os.getenv("ZDT_SNAPSHOTS_DIR", DEFAULT_SNAPSHOTS_DIR)
+        )
+        self._check_interval = (
+            check_interval_seconds
+            if check_interval_seconds is not None
+            else float(
+                os.getenv(
+                    "ZDT_RELOAD_CHECK_INTERVAL_SECONDS", DEFAULT_RELOAD_CHECK_INTERVAL_SECONDS
+                )
+            )
+        )
+        self._legacy_zip_path = legacy_zip_path
+        self._legacy_cache_path = legacy_cache_path
+        self._index: Optional[CorpusIndex] = None
+        self._version: Optional[str] = None
+        self._last_check: Optional[float] = None
+
+    @property
+    def current_version(self) -> Optional[str]:
+        """The snapshot version currently being served, or None while running on the
+        legacy (pre-ZDT, non-versioned) fallback path.
+
+        Future query caching must key on (current_version, normalized_query), not on
+        normalized_query alone -- a hot reload can change which sentences the same query
+        matches, so a version-blind cache key could serve a stale Top-5 after a swap.
+        """
+        return self._version
+
+    def get(self) -> CorpusIndex:
+        self._refresh_if_due()
+        return self._index
+
+    def _refresh_if_due(self) -> None:
+        now = time.monotonic()
+        if (
+            self._index is not None
+            and self._last_check is not None
+            and now - self._last_check < self._check_interval
+        ):
+            return
+        self._last_check = now
+
+        version = get_current_version(self._snapshots_dir)
+        if version is None:
+            if self._index is None:
+                logger.warning(
+                    "No published ZDT snapshot at %s; falling back to legacy "
+                    "load_or_build_index()",
+                    self._snapshots_dir,
+                )
+                self._index = self._load_legacy()
+            return
+
+        if version == self._version:
+            return
+
+        try:
+            new_index = load_snapshot(self._snapshots_dir, version)
+        except (OSError, pickle.PickleError):
+            logger.exception(
+                "Failed to load snapshot version=%s from %s; continuing to serve version=%s",
+                version,
+                self._snapshots_dir,
+                self._version,
+            )
+            if self._index is None:
+                raise
+            return
+
+        previous_version = self._version
+        self._index = new_index
+        self._version = version
+        logger.info("Hot-swapped corpus index: %s -> %s", previous_version, version)
+
+    def _load_legacy(self) -> CorpusIndex:
+        kwargs = {}
+        if self._legacy_zip_path is not None:
+            kwargs["zip_path"] = self._legacy_zip_path
+        if self._legacy_cache_path is not None:
+            kwargs["cache_path"] = self._legacy_cache_path
+        return load_or_build_index(**kwargs)
+
+
+# Process-wide singleton: the index is loaded/built once and reused across calls, per
 # PROJECT_SPEC.md's "build once, serve many" architecture (section 3) -- never reloaded or
-# rebuilt per keystroke/candidate.
-_default_index_instance: Optional[CorpusIndex] = None
+# rebuilt per keystroke/candidate. ZDT extends this: it is polled for a newer *published*
+# snapshot on the schedule above, but never reloaded per-query.
+_default_index_provider = HotReloadableIndex()
 
 
 def _get_default_index() -> CorpusIndex:
-    global _default_index_instance
-    if _default_index_instance is None:
-        _default_index_instance = load_or_build_index()
-    return _default_index_instance
+    return _default_index_provider.get()
 
 
 def get_best_k_completions(
