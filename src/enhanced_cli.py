@@ -7,17 +7,20 @@ try:
     from .auto_complete_data import AutoCompleteData
     from .cli import EMPTY_INPUT, format_suggestions, prepare_results
     from .contextual import ContextualCompletionError, ContextualResult
+    from .translation import TranslationError, TranslationService
 except ImportError:  # Supports: python src/main.py
     from auto_complete_data import AutoCompleteData
     from cli import EMPTY_INPUT, format_suggestions, prepare_results
     from contextual import ContextualCompletionError, ContextualResult
+    from translation import TranslationError, TranslationService
 
 CORPUS_MODE = "corpus"
 AI_MODE = "ai"
+TRANSLATION_MODE = "translation"
 DEFAULT_CONTEXT = "general, clear English"
 HELP_TEXT = (
-    "Commands: /mode corpus | /mode ai | /context <domain or style> | "
-    "/help | # reset | ~ quit"
+    "Commands: /mode corpus | /mode ai | /translate | /english | "
+    "/context <domain or style> | /help | # reset | ~ quit"
 )
 
 CorpusSearch = Callable[[str], List[AutoCompleteData]]
@@ -63,6 +66,7 @@ def process_session_input(
     new_text: str,
     corpus_search: CorpusSearch,
     contextual_generator: Optional[ContextualGenerator],
+    translation_service: Optional[TranslationService] = None,
 ) -> InteractionResult:
     """Process one input line without terminal I/O so every mode is testable."""
     command = new_text.strip()
@@ -88,6 +92,31 @@ def process_session_input(
         return InteractionResult(
             state=updated_state,
             output=format_suggestions(results),
+        )
+
+    if updated_state.mode == TRANSLATION_MODE:
+        if translation_service is None:
+            return InteractionResult(
+                state=updated_state,
+                output=(
+                    "Translation mode is unavailable: no translation service configured. "
+                    "Your query was kept; use /english."
+                ),
+            )
+        try:
+            translation = translation_service.translate_to_english(updated_state.query)
+        except TranslationError as exc:
+            return InteractionResult(
+                state=updated_state,
+                output=f"Translation failed: {exc}",
+            )
+        results = prepare_results(corpus_search(translation.translated_text))
+        return InteractionResult(
+            state=updated_state,
+            output=(
+                f"Translated English query: {translation.translated_text}\n"
+                f"{format_suggestions(results)}"
+            ),
         )
 
     if contextual_generator is None:
@@ -122,12 +151,24 @@ def _process_command(state: SessionState, command: str) -> InteractionResult:
     if name == "/help":
         return InteractionResult(state=state, output=HELP_TEXT)
 
+    if name == "/translate":
+        return InteractionResult(
+            state=replace(state, mode=TRANSLATION_MODE, query=""),
+            output="Translation mode enabled. Target language: English. Query reset.",
+        )
+
+    if name == "/english":
+        return InteractionResult(
+            state=replace(state, mode=CORPUS_MODE, query=""),
+            output="English corpus mode enabled. Query reset.",
+        )
+
     if name == "/mode":
         mode = argument.lower()
-        if mode not in (CORPUS_MODE, AI_MODE):
+        if mode not in (CORPUS_MODE, AI_MODE, TRANSLATION_MODE):
             return InteractionResult(
                 state=state,
-                output="Invalid mode. Use /mode corpus or /mode ai.",
+                output="Invalid mode. Use corpus, ai, or translation.",
             )
         return InteractionResult(
             state=replace(state, mode=mode, query=""),
@@ -155,12 +196,15 @@ def _process_command(state: SessionState, command: str) -> InteractionResult:
 
 def prompt_for(state: SessionState) -> str:
     context = f" | context={state.context}" if state.mode == AI_MODE else ""
+    if state.mode == TRANSLATION_MODE:
+        context = " | target=English"
     return f"[{state.mode.upper()}{context}] Enter more text: {state.query}"
 
 
 def run_feature_cli(
     corpus_search: CorpusSearch,
     contextual_generator: Optional[ContextualGenerator] = None,
+    translation_service: Optional[TranslationService] = None,
 ) -> None:
     """Run the integrated Part A + Part B interactive experience."""
     state = SessionState()
@@ -179,6 +223,7 @@ def run_feature_cli(
             new_text=additional_input,
             corpus_search=corpus_search,
             contextual_generator=contextual_generator,
+            translation_service=translation_service,
         )
         state = interaction.state
         print(interaction.output)

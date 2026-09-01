@@ -41,6 +41,7 @@ User interface (src/enhanced_cli.py)
 - The dependencies in `requirements.txt`
 - `resources/Archive.zip` for corpus mode
 - A Gemini API key only for AI mode
+- Google Cloud project and Application Default Credentials only for Translation mode
 
 Install dependencies:
 
@@ -89,6 +90,8 @@ The CLI starts in `CORPUS` mode, so Part A works without a Gemini key.
 
 - `/mode corpus` - use the original Part A corpus search and score.
 - `/mode ai` - use context-aware Gemini generation.
+- `/translate` - translate input to English, then search the corpus.
+- `/english` - return to regular English corpus mode.
 - `/context <domain or style>` - set the AI context.
 - `/context` - show the current context.
 - `#` - reset the current query without changing mode or context.
@@ -121,6 +124,33 @@ Gemini model: gemini-3.6-flash; response time: <measured> ms; no corpus source, 
 
 Gemini output is nondeterministic, so exact sentences can differ between runs. The
 automated tests use a deterministic fake client and validate the interface and labels.
+
+## Multilingual search mode
+
+Translation mode converts an accumulated non-English query to English with Google
+Cloud Translation and then searches the existing Part A corpus with the translated
+text. The translated English query is shown before the suggestions.
+
+```text
+/translate  # enter Translation mode and reset the query
+/english    # return to English corpus mode and reset the query
+```
+
+Google Cloud Translation uses Application Default Credentials. Do not store
+credentials in this repository. Configure them before starting the application:
+
+```powershell
+$env:GOOGLE_CLOUD_PROJECT="your-project-id"
+$env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\to\service-account.json"
+```
+
+Optional timeout override:
+
+```powershell
+$env:TRANSLATION_TIMEOUT_SECONDS="10"
+```
+
+Corpus and AI modes remain available without Translation credentials.
 
 ## Shared Protocol Buffers interface
 
@@ -173,6 +203,7 @@ Permanent client errors are not retried.
 - `GEMINI_API_KEY` is read only from the environment and is never logged or committed.
 - `.env` variants are ignored by Git; `.env.example` contains no secret.
 - Only text entered while explicitly in AI mode is sent to Gemini.
+- Only text entered in Translation mode is sent to Google Cloud Translation.
 - Do not send private or sensitive information without authorization.
 - Check current Gemini API permissions, quotas, and
   [pricing](https://ai.google.dev/gemini-api/docs/pricing) before a live demo. Paid
@@ -181,6 +212,7 @@ Permanent client errors are not retried.
 ## Tests and evidence
 
 Run everything:
+
 
 ```bash
 python -m pytest -q
@@ -192,8 +224,9 @@ The tests cover:
 - missing credentials, service failure, malformed output, duplicates, and bad input;
 - visible modes, context changes, reset, exit, and unknown commands;
 - generated-content labeling with no fabricated corpus metadata;
-- preservation of all Part A tests and behavior; and
-- Protobuf request/response serialization, corpus and AI mapping, and invalid bytes.
+- preservation of all Part A tests and behavior;
+- Protobuf request/response serialization, corpus and AI mapping, and invalid bytes; and
+- Hebrew/Arabic translation flow, mode switching, and Translation API failures.
 
 The feature metric is response time. Every successful Gemini response records and
 displays its latency in milliseconds. Relevance is evaluated with the same prefix under
