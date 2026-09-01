@@ -38,6 +38,16 @@ class FakeOpener:
         return FakeHTTPResponse(self.payload)
 
 
+class SequencedFakeOpener(FakeOpener):
+    def __init__(self, payloads):
+        super().__init__()
+        self.payloads = iter(payloads)
+
+    def __call__(self, request, timeout):
+        self.calls.append((request, timeout))
+        return FakeHTTPResponse(next(self.payloads))
+
+
 def api_payload(suggestions):
     generated_json = json.dumps(suggestions)
     return json.dumps(
@@ -85,6 +95,20 @@ def test_generate_returns_validated_structured_suggestions():
     config = body["generationConfig"]
     assert config["responseMimeType"] == "application/json"
     assert config["responseJsonSchema"]["maxItems"] == 2
+    assert config["maxOutputTokens"] == 2048
+    assert config["thinkingConfig"]["thinkingLevel"] == "minimal"
+
+
+def test_generate_retries_one_malformed_structured_response():
+    opener = SequencedFakeOpener(
+        [b'{"candidates":[', api_payload(["Hello, and welcome."])]
+    )
+    generator = GeminiSuggestionClient(api_key="test-key", opener=opener)
+
+    result = generator.generate("Hello", "friendly", count=1)
+
+    assert [item.text for item in result.suggestions] == ["Hello, and welcome."]
+    assert len(opener.calls) == 2
 
 
 def test_generate_removes_duplicates_and_prefix_breaking_results():

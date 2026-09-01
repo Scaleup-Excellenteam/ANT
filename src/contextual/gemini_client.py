@@ -19,8 +19,8 @@ from .errors import (
 )
 from .models import ContextualResult, GeneratedSuggestion
 
-DEFAULT_MODEL = "gemini-2.5-flash"
-DEFAULT_TIMEOUT_SECONDS = 15.0
+DEFAULT_MODEL = "gemini-3.6-flash"
+DEFAULT_TIMEOUT_SECONDS = 30.0
 MAX_CONTEXT_LENGTH = 500
 MAX_PREFIX_LENGTH = 2000
 MAX_RESPONSE_BYTES = 1_000_000
@@ -52,8 +52,20 @@ class GeminiSuggestionClient:
         self._validate_request(prefix, context, count)
 
         started = time.perf_counter()
-        api_payload = self._request_generation(prefix, context, count)
-        suggestions = self._parse_api_payload(api_payload, prefix, count)
+        for attempt in range(2):
+            try:
+                api_payload = self._request_generation(prefix, context, count)
+                suggestions = self._parse_api_payload(api_payload, prefix, count)
+                break
+            except InvalidGeminiResponseError:
+                # Retry one transient malformed or truncated structured response.
+                if attempt == 1:
+                    raise
+            except ContextualServiceError as exc:
+                # Retry timeouts, network faults, rate limits, and server errors;
+                # permanent client errors such as 400/403/404 fail immediately.
+                if attempt == 1 or not self._is_retryable_service_error(exc):
+                    raise
         latency_ms = round((time.perf_counter() - started) * 1000)
         return ContextualResult(
             suggestions=tuple(
@@ -113,6 +125,13 @@ class GeminiSuggestionClient:
         return payload
 
     @staticmethod
+    def _is_retryable_service_error(error: ContextualServiceError) -> bool:
+        cause = error.__cause__
+        if isinstance(cause, HTTPError):
+            return cause.code in (408, 429) or 500 <= cause.code <= 599
+        return isinstance(cause, (URLError, TimeoutError, OSError))
+
+    @staticmethod
     def _validate_request(prefix: str, context: str, count: int) -> None:
         if not prefix:
             raise ValueError("prefix must not be empty")
@@ -140,8 +159,8 @@ class GeminiSuggestionClient:
     @staticmethod
     def _generation_config(count: int) -> Dict[str, Any]:
         return {
-            "temperature": 0.4,
-            "maxOutputTokens": 512,
+            "maxOutputTokens": 2048,
+            "thinkingConfig": {"thinkingLevel": "minimal"},
             "responseMimeType": "application/json",
             "responseJsonSchema": {
                 "type": "array",
