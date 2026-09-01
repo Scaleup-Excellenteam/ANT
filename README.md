@@ -243,3 +243,101 @@ and follows the selected context.
 - AI mode currently sends only the prefix and user context, not corpus documents.
 - The existing Part A index is large and corpus searches can still be slow for common
   queries; that performance issue is separate from the Part B integration.
+
+## Satellite connection-loss resilience (local simulation)
+
+This feature demonstrates resilience patterns for a server whose remote data link can
+temporarily disappear. It uses a local simulator only; it has not been tested against a
+physical satellite or spacecraft system.
+
+### Architecture
+
+```text
+Terminal CLI ---- automatic query recording ----|
+                                                v
+Flask monitoring/API ----------------> SatelliteResilienceService
+                                                |
+                         |----------------------|---------------------|
+                         v                                            v
+              SQLite local cache/queue                 SQLite remote-link simulator
+              (shared by CLI and UI)                    (shared link/data state)
+```
+
+Autocomplete, scoring, indexing, Gemini, translation, and Protobuf remain separate from
+this subsystem. A future HTTP, gRPC, or database adapter can implement `SatelliteClient`
+without changing terminal search or resilience rules.
+
+Connection states are explicit:
+
+- `ONLINE`: reads and writes use the remote client.
+- `DEGRADED`: one or more health checks failed, but the configured threshold has not
+  been reached.
+- `OFFLINE`: the failure threshold was reached; reads use marked-stale cached values and
+  writes are queued.
+- `RECOVERING`: pending writes are replayed in creation order and the cache is refreshed.
+
+`SATELLITE_FAILURE_THRESHOLD` defaults to `3`, `SATELLITE_HEALTH_TIMEOUT_MS` to `1500`,
+and `SATELLITE_MAX_RETRIES` to `3`. Health checks are on request through the API rather
+than a background scheduler, keeping the local demo deterministic.
+
+Online reads refresh SQLite and return `source=satellite, stale=false`. Offline reads
+return `source=cache, stale=true` with `cached_at`; a cache miss returns an explicit
+unavailable error. Offline writes are stored with an operation ID, payload, timestamp,
+retry count, and status. Successful replay marks each row `SENT` immediately, so a later
+failure resumes at the first remaining `PENDING` operation. The simulator remembers
+operation IDs and does not apply a duplicate write twice.
+
+Every non-command query entered through `python -m src.main` is recorded automatically as
+a `terminal-query:<operation-id>` record. When the simulated link is online, it is written
+to the simulated remote database and mirrored into the local cache. When offline, it is
+queued without interrupting autocomplete and appears in the cache after reconnection.
+
+### Run the demo
+
+```powershell
+python -m pip install -r requirements.txt
+# Terminal 1: developer monitoring panel
+python -m src.ui.web_app
+
+# Terminal 2: normal autocomplete user
+python -m src.main
+```
+
+Open `http://127.0.0.1:5000`. The normal terminal user only types autocomplete text;
+satellite recording is automatic. For a panel demonstration:
+
+1. Type `to pe` in the autocomplete terminal.
+2. Verify it appears under **Cached terminal activity** in the monitoring page.
+3. As a developer, click **Simulate Disconnect**, then type another terminal query.
+4. Verify that query is queued while autocomplete continues to work.
+5. Click **Reconnect + Synchronize** and verify the queue returns to zero.
+
+Development-only monitoring endpoints:
+
+```text
+GET  /api/satellite/status
+POST /api/satellite/health
+POST /api/satellite/simulate-disconnect
+POST /api/satellite/reconnect
+POST /api/satellite/simulate-latency
+GET  /api/satellite/pending
+GET  /api/satellite/cache
+GET  /api/satellite/data/<key>
+POST /api/satellite/data
+```
+
+The shared local cache/queue defaults to `.runtime/satellite_local.sqlite3`; the simulated
+remote link/data defaults to `.runtime/satellite_remote_simulator.sqlite3`. Both are ignored
+by Git. Override them with `SATELLITE_STATE_DB` and `SATELLITE_SIMULATOR_DB`.
+
+### Limitations
+
+- The SQLite-backed simulator is local development infrastructure, not a physical link.
+- The demo endpoints are intentionally unauthenticated and must not be exposed publicly.
+- Health checks are request-driven, not scheduled in a background worker.
+- SQLite is suitable for a local multi-process demo. A real distributed deployment would
+  need a shared production database/queue and coordinated recovery workers.
+- The monitoring page is for developers/panel demonstrations; normal users do not manage
+  the satellite connection.
+- A real adapter must preserve operation-ID idempotency and define domain-specific conflict
+  resolution for concurrent writes.

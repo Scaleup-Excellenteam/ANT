@@ -11,19 +11,23 @@ try:
     from .contextual import GeminiSuggestionClient
     from .enhanced_cli import run_feature_cli
     from .matching import get_best_k_completions
+    from .satellite import SatelliteTerminalActivityRecorder, build_shared_satellite_service
     from .translation import GoogleTranslationService
 except ImportError:  # Also supports: python src/main.py
     from contextual import GeminiSuggestionClient
     from enhanced_cli import run_feature_cli
     from matching import get_best_k_completions
+    from satellite import SatelliteTerminalActivityRecorder, build_shared_satellite_service
     from translation import GoogleTranslationService
 
 
 def main() -> None:
+    satellite_service = build_shared_satellite_service()
     run_feature_cli(
         corpus_search=get_best_k_completions,
         contextual_generator=GeminiSuggestionClient(),
         translation_service=GoogleTranslationService(),
+        activity_recorder=SatelliteTerminalActivityRecorder(satellite_service),
     )
 
 

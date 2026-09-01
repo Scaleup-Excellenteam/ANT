@@ -5,3 +5,4 @@ corpus_index.pickle
 .env
 .env.*
 !.env.example
+.runtime/

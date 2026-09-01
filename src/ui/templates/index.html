@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Auto-Complete Resilience Demo</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <p class="eyebrow">LOCAL DEVELOPMENT DEMO</p>
+      <h1>Auto-Complete + Satellite Resilience</h1>
+      <p>This simulates connection loss locally; it is not connected to a physical satellite.</p>
+    </header>
+
+    <section class="panel satellite" aria-labelledby="satellite-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">SIMULATED LINK</p>
+          <h2 id="satellite-title">Satellite Connection Resilience</h2>
+        </div>
+        <span id="satellite-badge" class="badge">LOADING</span>
+      </div>
+
+      <div class="metrics">
+        <div><span>Status</span><strong id="sat-status">—</strong></div>
+        <div><span>Mode</span><strong id="sat-mode">—</strong></div>
+        <div><span>Latency</span><strong id="sat-latency">—</strong></div>
+        <div><span>Cached records</span><strong id="sat-cache">—</strong></div>
+        <div><span>Pending operations</span><strong id="sat-pending">—</strong></div>
+        <div><span>Last contact</span><strong id="sat-contact">—</strong></div>
+      </div>
+
+      <div class="controls">
+        <button id="disconnect" class="danger" type="button">Simulate Disconnect</button>
+        <button id="reconnect" type="button">Reconnect + Synchronize</button>
+        <label>Latency (ms) <input id="latency-input" type="number" min="0" max="30000" value="250"></label>
+        <button id="set-latency" class="secondary" type="button">Apply Latency</button>
+      </div>
+
+      <div class="demo-grid">
+        <form id="sat-read-form" class="demo-card">
+          <h3>Read data</h3>
+          <input id="sat-read-key" value="mission-status" aria-label="Satellite read key">
+          <button type="submit">Read</button>
+          <pre id="sat-read-output">Read while online to populate the local cache.</pre>
+        </form>
+
+        <form id="sat-write-form" class="demo-card">
+          <h3>Write data</h3>
+          <input id="sat-write-key" value="panel-note" aria-label="Satellite write key">
+          <input id="sat-write-value" value="Queued during the demo" aria-label="Satellite write value">
+          <button type="submit">Send / Queue</button>
+          <pre id="sat-write-output">Disconnect first to demonstrate durable queueing.</pre>
+        </form>
+      </div>
+
+      <details open>
+        <summary>Cached terminal activity</summary>
+        <pre id="cache-output">[]</pre>
+      </details>
+      <details>
+        <summary>Pending operation queue</summary>
+        <pre id="pending-output">[]</pre>
+      </details>
+      <p id="satellite-message" class="status"></p>
+    </section>
+  </main>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
