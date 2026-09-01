@@ -8,6 +8,7 @@ same CLI can be connected to the real matching function without rewriting the
 serving logic.
 """
 
+import logging
 from typing import Callable, List, Sequence, Tuple
 
 try:
@@ -24,6 +25,7 @@ EMPTY_INPUT = "Please enter some text."
 BEST_MATCHES = 5
 
 SearchFunction = Callable[[str], List[AutoCompleteData]]
+logger = logging.getLogger("cli")
 
 
 def prepare_results(results: Sequence[AutoCompleteData]) -> List[AutoCompleteData]:
@@ -74,11 +76,13 @@ def process_input(
 
     # '#' means the user finished the current sentence and wants a fresh query.
     if new_text.endswith(RESTART_MESSAGE):
+        logger.info("Query reset requested")
         return "", "Query reset. Start a new sentence."
 
     updated_query = current_query + new_text
 
     if not updated_query.strip():
+        logger.debug("Empty query ignored")
         return updated_query, EMPTY_INPUT
 
     results = search_function(updated_query)
@@ -90,16 +94,19 @@ def run_cli(search_function: SearchFunction) -> None:
     """Run the online/serving loop."""
 
     current_query = ""
+    logger.info("CLI session started")
     print(WELCOME_MSG)
 
     while True:
         try:
             additional_input = input(f"{GET_INPUT} {current_query}")
         except (EOFError, KeyboardInterrupt):
+            logger.info("CLI session ended by input interruption")
             print("\nGoodbye.")
             break
 
         if additional_input.endswith(QUIT_MESSAGE):
+            logger.info("CLI session ended by user")
             print("Goodbye.")
             break
 

@@ -34,6 +34,21 @@ query, `#` to reset it, or `~` to exit.
 python -m pytest -q
 ```
 
+## Logging
+
+Application logging is configured once at startup and written to `logs/app.log`.
+The default level is `INFO`; use `DEBUG` for candidate, verification, ranking,
+and timing details:
+
+```powershell
+$env:AUTOCOMPLETE_LOG_LEVEL = "DEBUG"
+python -m src.main
+```
+
+Set `AUTOCOMPLETE_LOG_FILE` to override the log path. Log files rotate at 5 MB,
+with three backups (`app.log.1` through `app.log.3`). Generated logs are ignored
+by Git. API keys, tokens, and environment-variable values are never logged.
+
 ## Team decisions currently used by this initial workspace
 
 - Empty input: print a message and do not search.

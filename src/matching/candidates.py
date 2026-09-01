@@ -14,6 +14,7 @@ the project handoff:
     matches that fall entirely inside a word.
 """
 
+import logging
 from typing import TYPE_CHECKING, Set
 
 if TYPE_CHECKING:
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
 # Mirrors the threshold documented in src/init_offline/README.md ("Short-query fallback") --
 # below this length, `trigram_candidates` alone is not a completeness guarantee.
 SHORT_QUERY_MAX_LENGTH = 5
+logger = logging.getLogger("matching.candidates")
 
 
 def generate_candidates(index: "CorpusIndex", normalized_query: str) -> Set[int]:
@@ -29,11 +31,14 @@ def generate_candidates(index: "CorpusIndex", normalized_query: str) -> Set[int]
     caller (`completions.get_best_k_completions`) is responsible for verifying each one.
     """
     if not normalized_query:
+        logger.debug("Candidate generation skipped for empty normalized query")
         return set()
 
     if len(normalized_query) <= SHORT_QUERY_MAX_LENGTH:
+        logger.debug("Candidate generation started; strategy=short-query")
         return set(index.short_query_candidates(normalized_query))
 
+    logger.debug("Candidate generation started; strategy=word-fuzzy-trigram")
     candidate_ids: Set[int] = set()
     for word in normalized_query.split(" "):
         if not word:

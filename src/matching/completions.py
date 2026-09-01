@@ -14,6 +14,8 @@ Pipeline:
 """
 
 import heapq
+import logging
+import time
 from typing import List, Optional
 
 try:
@@ -27,6 +29,7 @@ from .scoring import score_match
 from .verifier import verify_match
 
 DEFAULT_K = 5
+logger = logging.getLogger("matching")
 
 # Lazy, process-wide singleton: the index is loaded/built once and reused across calls, per
 # PROJECT_SPEC.md's "build once, serve many" architecture (section 3) -- never reloaded or
@@ -53,27 +56,43 @@ def get_best_k_completions(
     `load_or_build_index`) be used.
     """
     normalized_query = normalize(prefix)
+    started = time.perf_counter()
+    logged_query = prefix[:200].replace("\r", "\\r").replace("\n", "\\n")
+    logger.info("Query received: %r", logged_query)
     if not normalized_query:
         # An empty normalized query (e.g. blank/punctuation-only prefix) can never usefully
         # match anything, and Member 1's `short_query_candidates("")` would return a
         # near-total scan of the vocabulary -- deliberately short-circuited here.
+        logger.info(
+            "Returned 0 results in %.3fs; normalized query is empty",
+            time.perf_counter() - started,
+        )
         return []
 
     if index is None:
         index = _get_default_index()
 
+    candidate_started = time.perf_counter()
     candidate_ids = generate_candidates(index, normalized_query)
+    logger.debug(
+        "Candidates generated: %d in %.3fs",
+        len(candidate_ids),
+        time.perf_counter() - candidate_started,
+    )
+    verified_count = 0
 
     def scored_matches():
         """Yield (score, completed_sentence, source_text, offset) for every candidate that
         verifies -- a plain tuple, not `AutoCompleteData`, since most candidates never make
         the final top k and building the dataclass for each one would be wasted work.
         """
+        nonlocal verified_count
         for sentence_id in candidate_ids:
             record = index.get_sentence(sentence_id)
             match = verify_match(normalized_query, record.normalized_text)
             if match is None:
                 continue
+            verified_count += 1
             yield (score_match(match), record.original_text, record.source_path, record.offset)
 
     # heapq.nsmallest(k, iterable, key) is documented to be equivalent to
@@ -82,11 +101,26 @@ def get_best_k_completions(
     # materializes more than k items at a time (the generator above is consumed lazily).
     # Negating the score in the key makes "smallest key" mean "highest score first"; the
     # completed_sentence stays ascending for the alphabetical tie-break.
+    matching_started = time.perf_counter()
     top = heapq.nsmallest(k, scored_matches(), key=lambda item: (-item[0], item[1]))
+    matching_elapsed = time.perf_counter() - matching_started
+    logger.debug(
+        "Matching/verification completed; verified=%d in %.3fs",
+        verified_count,
+        matching_elapsed,
+    )
+    logger.debug(
+        "Scoring/ranking completed; ranked=%d requested_k=%d pipeline_time=%.3fs",
+        len(top),
+        k,
+        matching_elapsed,
+    )
 
-    return [
+    results = [
         AutoCompleteData(
             completed_sentence=sentence, source_text=source, offset=offset, score=score
         )
         for score, sentence, source, offset in top
     ]
+    logger.info("Returned %d results in %.3fs", len(results), time.perf_counter() - started)
+    return results

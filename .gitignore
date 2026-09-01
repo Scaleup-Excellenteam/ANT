@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .pytest_cache/
 corpus_index.pickle
+logs/*.log
+logs/*.log.*

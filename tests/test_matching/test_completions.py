@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from matching.completions import get_best_k_completions
@@ -86,3 +88,17 @@ class TestDuplicateSentences:
         offsets = sorted(r.offset for r in results)
         assert offsets == [0, 1]
         assert all(r.completed_sentence == "repeat me exactly" for r in results)
+
+
+def test_query_pipeline_logs_aggregate_counts_and_timing(make_index, caplog):
+    index = make_index(["python language", "python tutorial", "unrelated text"])
+    with caplog.at_level(logging.DEBUG):
+        results = get_best_k_completions("python", index=index)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert len(results) == 2
+    assert any("Query received" in message for message in messages)
+    assert any("Candidates generated:" in message for message in messages)
+    assert any("verified=" in message for message in messages)
+    assert any("Scoring/ranking completed" in message for message in messages)
+    assert any("Returned 2 results in" in message for message in messages)
