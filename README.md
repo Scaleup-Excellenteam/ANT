@@ -258,3 +258,77 @@ by Git. API keys, tokens, and environment-variable values are never logged.
 - AI mode currently sends only the prefix and user context, not corpus documents.
 - The existing Part A index is large and corpus searches can still be slow for common
   queries; that performance issue is separate from the Part B integration.
+
+## Zero-downtime snapshot publishing (ZDT)
+
+The corpus index used to be a single flat `corpus_index.pickle`, built once and read for the
+life of the process (`init_offline.load_or_build_index`, still the default when nothing below
+is set up). That works for a one-shot local run, but a live service has no safe way to pick
+up a new or updated corpus without either overwriting the file a reader might be mid-load on,
+or restarting the process outright.
+
+`src/init_offline/snapshot_store.py` decouples offline building from online serving through
+the filesystem, so a new data source can be published to an already-running service, live,
+remotely, with no restart and no dropped requests:
+
+- Every offline build writes to its own immutable, versioned directory —
+  `<snapshots_dir>/<timestamp>-<content-hash>/corpus_index.pickle` — never overwriting a
+  previous, possibly still-in-use snapshot.
+- A build only becomes "live" once a small `CURRENT` pointer file inside `snapshots_dir` is
+  flipped to it, and only after the build validates (rejects an empty/zero-sentence corpus).
+  The pointer is written via write-to-temp-file-then-`os.replace` (POSIX `rename(2)`), which
+  is atomic within one filesystem — a reader always sees a complete, valid version id.
+- The online side, `matching.completions.HotReloadableIndex`, is what `get_best_k_completions`
+  actually calls through. It polls `CURRENT` at most once every
+  `ZDT_RELOAD_CHECK_INTERVAL_SECONDS` (default 2s), and only when the pointer names a version
+  it hasn't loaded yet does it load that snapshot and swap its in-memory reference — a single
+  attribute assignment, atomic under the GIL. A query already in progress keeps the
+  `CorpusIndex` object reference it already grabbed, so the swap never affects an in-flight
+  request.
+
+Add a new data source with the service already running, no restart:
+
+```bash
+# 1. Build the new corpus zip (or point at a shared/remote path this snapshots_dir already
+#    resolves to -- local disk, NFS, a synced cloud-storage mount, anything with normal
+#    filesystem rename semantics works).
+# 2. Build + validate + publish in one step:
+python -m src.init_offline.build_snapshot_cli --zip new_source.zip \
+    --snapshots-dir /srv/shared/corpus_snapshots
+
+# 3. Within ZDT_RELOAD_CHECK_INTERVAL_SECONDS, every running `python -m src.main` (or any
+#    other process calling get_best_k_completions) polling that same --snapshots-dir starts
+#    answering queries from the new snapshot -- live, with zero downtime.
+```
+
+List published versions or roll back to a previous one without rebuilding:
+
+```bash
+python -m src.init_offline.build_snapshot_cli --list --snapshots-dir /srv/shared/corpus_snapshots
+python -m src.init_offline.build_snapshot_cli --rollback 20260101T120000Z-3f9a2b1c8e4d \
+    --snapshots-dir /srv/shared/corpus_snapshots
+```
+
+By default `snapshots_dir` is `.runtime/corpus_snapshots` next to the repo (override with
+`ZDT_SNAPSHOTS_DIR`); this is git-ignored local/deployment state, not checked-in data.
+
+### Limitations
+
+- This repo's offline builder (`CorpusIndex.build_from_zip`) still builds from one zip
+  archive at a time. "Adding a data source" means publishing a new zip that contains the
+  full corpus you want served (old content plus the new addition) as a new version — there
+  is no multi-archive merge step; that is a natural next step but out of scope here.
+- The offline build and the online service must load pickles produced under the same Python
+  import convention (both invoked as `python -m src...` from the repo root, as the README
+  already recommends) — this is a pre-existing constraint of `CorpusIndex`'s plain-`pickle`
+  persistence, unchanged by this feature.
+- `HotReloadableIndex`'s check-then-load is not additionally locked, so two threads racing
+  the same reload window could both load the same new snapshot once (correct, just
+  redundant work). The one process this repo actually runs today (`python -m src.main`) is
+  single-threaded, so this does not occur in practice; a future concurrent server adopting
+  this class should add a lock around `_refresh_if_due` if that changes.
+- This is zero **downtime**, not zero **latency spike**: the service stays available and
+  existing requests keep serving from the old index during a swap, but the one request
+  whose `_refresh_if_due` call detects the new version loads it synchronously and may see
+  several seconds of added latency at this corpus's current size. Making that load
+  asynchronous/background is a possible future improvement, not implemented here.

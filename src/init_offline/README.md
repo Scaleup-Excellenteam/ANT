@@ -131,6 +131,42 @@ Plain `pickle` — this is a pure in-process Python structure (dict + list of da
 small trie), no cross-language or cross-version distribution need, so nothing fancier
 (JSON/SQLite/custom binary) buys anything here.
 
+## ZDT: zero-downtime snapshot publishing (`snapshot_store.py`)
+
+The single flat `corpus_index.pickle` above is fine for one-shot local runs, but a live
+service can't safely rebuild it in place (a reader could open it mid-write) and has no way
+to pick up a new corpus without restarting. `snapshot_store.py` extends the same `pickle`
+persistence with versioning and an atomic hand-off:
+
+```python
+from init_offline import build_snapshot, publish_snapshot, get_current_version, load_snapshot
+
+# Build-then-publish in one call -- validates (rejects an empty build) before flipping the
+# pointer, so CURRENT only ever names a snapshot that finished building successfully.
+version = publish_snapshot(zip_path="new_source.zip", snapshots_dir="/srv/shared/corpus_snapshots")
+
+# Anywhere (same box or a shared/remote filesystem) that reads the pointer:
+current = get_current_version("/srv/shared/corpus_snapshots")   # e.g. "20260101T120000Z-3f9a2b1c8e4d"
+index = load_snapshot("/srv/shared/corpus_snapshots", current)
+```
+
+Every build gets its own immutable directory (`<snapshots_dir>/<version>/corpus_index.pickle`);
+publishing a new one never overwrites or deletes an older, possibly still-in-use snapshot.
+`CURRENT` is a one-line pointer file, written via write-to-temp-file-then-`os.replace` (POSIX
+`rename(2)`) so it is always either the old, complete value or the new, complete value — never
+truncated mid-read.
+
+`src/init_offline/build_snapshot_cli.py` is the operator-facing command for this:
+
+```bash
+python -m src.init_offline.build_snapshot_cli --zip resources/Archive.zip
+python -m src.init_offline.build_snapshot_cli --list
+python -m src.init_offline.build_snapshot_cli --rollback 20260101T120000Z-3f9a2b1c8e4d
+```
+
+See the top-level README's "Zero-downtime snapshot publishing" section for how the online
+side (`matching.completions.HotReloadableIndex`) polls this and hot-swaps live.
+
 ## Running the tests
 
 ```bash

@@ -12,6 +12,16 @@ from .corpus_index import (
     save_index,
 )
 from .models import RawLine, SentenceRecord
+from .snapshot_store import (
+    DEFAULT_SNAPSHOTS_DIR,
+    SnapshotValidationError,
+    build_snapshot,
+    get_current_version,
+    list_snapshot_versions,
+    load_snapshot,
+    publish_snapshot,
+    set_current_version,
+)
 from .text_utils import normalize, trigrams
 from .trigram_index import TrigramIndex
 from .vocabulary_trie import VocabularyTrie
@@ -29,4 +39,13 @@ __all__ = [
     "TrigramIndex",
     "VocabularyTrie",
     "WordInvertedIndex",
+    # ZDT: versioned snapshot store (see snapshot_store.py)
+    "DEFAULT_SNAPSHOTS_DIR",
+    "SnapshotValidationError",
+    "build_snapshot",
+    "get_current_version",
+    "list_snapshot_versions",
+    "load_snapshot",
+    "publish_snapshot",
+    "set_current_version",
 ]
